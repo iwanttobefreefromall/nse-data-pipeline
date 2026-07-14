@@ -1,0 +1,47 @@
+name: Fetch NSE F&O Bhavcopy
+
+on:
+  schedule:
+    # Runs at 1:35 PM UTC every weekday (which is 7:05 PM IST)
+    - cron: '35 13 * * 1-5'
+  workflow_dispatch: # Allows you to run it manually with a button click
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Get yesterday's date (IST)
+        run: |
+          echo "DAY=$(TZ='Asia/Kolkata' date -d 'yesterday' +'%d')" >> $GITHUB_ENV
+          echo "MON=$(TZ='Asia/Kolkata' date -d 'yesterday' +'%b' | tr '[:lower:]' '[:upper:]')" >> $GITHUB_ENV
+          echo "YEAR=$(TZ='Asia/Kolkata' date -d 'yesterday' +'%Y')" >> $GITHUB_ENV
+
+      - name: Download and extract Bhavcopy
+        run: |
+          # NSE URL structure: foDDMMMYYYYbhavcopy.zip
+          URL="https://archives.nseindia.com/content/historical/DERIVATIVES/${{ env.YEAR }}/${{ env.MON }}/${{ env.DAY }}/fo${{ env.DAY }}${{ env.MON }}${{ env.YEAR }}bhavcopy.zip"
+          echo "Fetching from: $URL"
+          
+          # Download the zip file
+          curl -sL -o bhavcopy.zip "$URL"
+          
+          # Unzip it
+          unzip -o bhavcopy.zip
+          
+          # Rename the extracted csv to a static name so Google Sheets never breaks
+          mv *.csv fo_bhavcopy.csv
+          
+          # Clean up the zip file
+          rm bhavcopy.zip
+
+      - name: Commit and Push to Repository
+        run: |
+          git config --global user.name "Automation Bot"
+          git config --global user.email "bot@github.com"
+          git add fo_bhavcopy.csv
+          git commit -m "Update F&O Bhavcopy for ${{ env.DAY }}-${{ env.MON }}-${{ env.YEAR }}" || echo "No changes to commit"
+          git push
