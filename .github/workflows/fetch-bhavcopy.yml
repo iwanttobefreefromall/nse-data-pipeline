@@ -2,9 +2,9 @@ name: Fetch NSE F&O Bhavcopy
 
 on:
   schedule:
-    # Runs at 1:35 PM UTC every weekday (which is 7:05 PM IST)
+    # Runs at 1:35 PM UTC (7:05 PM IST) Mon-Fri
     - cron: '35 13 * * 1-5'
-  workflow_dispatch: # Allows you to run it manually with a button click
+  workflow_dispatch: 
 
 jobs:
   build:
@@ -14,34 +14,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Get yesterday's date (IST)
-        run: |
-          echo "DAY=$(TZ='Asia/Kolkata' date -d 'yesterday' +'%d')" >> $GITHUB_ENV
-          echo "MON=$(TZ='Asia/Kolkata' date -d 'yesterday' +'%b' | tr '[:lower:]' '[:upper:]')" >> $GITHUB_ENV
-          echo "YEAR=$(TZ='Asia/Kolkata' date -d 'yesterday' +'%Y')" >> $GITHUB_ENV
-
       - name: Download and extract Bhavcopy
         run: |
-          # NSE URL structure: foDDMMMYYYYbhavcopy.zip
-          URL="https://archives.nseindia.com/content/historical/DERIVATIVES/${{ env.YEAR }}/${{ env.MON }}/${{ env.DAY }}/fo${{ env.DAY }}${{ env.MON }}${{ env.YEAR }}bhavcopy.zip"
-          echo "Fetching from: $URL"
+          # We check the last 3 days to handle weekends and trading holidays automatically
+          for i in {0..2}; do
+            DAY=$(TZ='Asia/Kolkata' date -d "$i days ago" +'%d')
+            MON=$(TZ='Asia/Kolkata' date -d "$i days ago" +'%b' | tr '[:lower:]' '[:upper:]')
+            YEAR=$(TZ='Asia/Kolkata' date -d "$i days ago" +'%Y')
+            URL="https://archives.nseindia.com/content/historical/DERIVATIVES/${YEAR}/${MON}/${DAY}/fo${DAY}${MON}${YEAR}bhavcopy.zip"
+            
+            echo "Trying: $URL"
+            
+            # Download with a Chrome Browser User-Agent to bypass basic bot blocks
+            HTTP_CODE=$(curl -sL -w "%{http_code}" -o bhavcopy.zip \
+              -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+              "$URL")
+            
+            # Check if HTTP code is 200 (OK) AND the file is actually a Zip archive, not HTML
+            if [ "$HTTP_CODE" -eq 200 ] && file bhavcopy.zip | grep -q "Zip archive"; then
+              echo "Success! Found valid ZIP file."
+              break
+            else
+              echo "Failed to get valid ZIP (HTTP $HTTP_CODE). Trying older date..."
+              rm -f bhavcopy.zip
+            fi
+          done
           
-          # Download the zip file
-          curl -sL -o bhavcopy.zip "$URL"
-          
-          # Unzip it
-          unzip -o bhavcopy.zip
-          
-          # Rename the extracted csv to a static name so Google Sheets never breaks
-          mv *.csv fo_bhavcopy.csv
-          
-          # Clean up the zip file
-          rm bhavcopy.zip
-
-      - name: Commit and Push to Repository
-        run: |
-          git config --global user.name "Automation Bot"
-          git config --global user.email "bot@github.com"
-          git add fo_bhavcopy.csv
-          git commit -m "Update F&O Bhavcopy for ${{ env.DAY }}-${{ env.MON }}-${{ env.YEAR }}" || echo "No changes to commit"
-          git push
+          # Safety check
